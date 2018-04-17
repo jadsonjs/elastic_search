@@ -1,2 +1,11 @@
-/.gradle/
+# all output directories
 /bin/
+/build/
+# all config directories
+/.gradle/
+/.settings/
+.classpath
+.project
+
+# all .class files
+*.class
