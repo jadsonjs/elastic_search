@@ -4,7 +4,7 @@
 package br.ufrn.deeplearning.model;
 
 /**
- * log operação data
+ * log operacao data
  * 
  * @author jadson
  *
@@ -21,6 +21,10 @@ public class LogOperacao {
 	public String nomeExcecao;
 	public String message;
 	public String id_sistema;
+	
+	public String convertoToCSVLine() {
+		return id_registro_entrada+";"+id_sistema+";"+data_hora_operacao+";"+url+";"+parametros+";"+tempo+";"+erro+";"+nomeExcecao+";";
+	}
 	
 	@Override
 	public String toString() {
