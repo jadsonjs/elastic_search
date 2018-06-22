@@ -10,8 +10,11 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -30,6 +33,7 @@ import org.codehaus.jackson.node.ArrayNode;
 
 import br.ufrn.deeplearning.model.LogOperacao;
 import br.ufrn.deeplearning.model.LogSystem;
+import br.ufrn.deeplearning.util.CSVUtil;
 
 
 /**
@@ -75,33 +79,188 @@ public class ElasticSearchLogOperacaoRestClient {
 	 */
 	public static void main(String[] args) throws IOException {
 		
+			
+		getLogOperacaoSplittedByUser();
+
+		
+	}
+	
+	
+	
+	/**
+	 * Generate a set of logOperacao of specific user
+	 * @throws IOException
+	 */
+	public static void getLogOperacaoSplittedByUser() throws IOException {
+
 		ZoneId defaultZoneId = ZoneId.systemDefault();
 		
 		LocalDateTime start = LocalDateTime.now();
-		start = start.minusDays(1);
+		start = start.minusDays(15);
 		Date startDate = Date.from(start.atZone(defaultZoneId).toInstant());
 		
-		Instant end = Instant.now();
+		LocalDateTime end = LocalDateTime.now();
+		end = end.minusMonths(0);
 		Date endDate = Date.from(end.atZone(defaultZoneId).toInstant());
-		
 		
 		long qtdresults = countLogOperacao(LogSystem.SIGEVENTOS.getId(), startDate.getTime(), endDate.getTime(), 0, 0); // 11 million
 		
-		qtdresults = 100;   // TODO limit for tests
+		System.out.println(">>>>>>>>>>>>>>>>>>>>>> "+qtdresults);
+		
+		int pageSize = 5000;
+		
+		int qtdPages = (int) (qtdresults/pageSize);
+	
+		
+		List<LogOperacao> logsOperacao = new ArrayList<>();
+		
+		Integer traningFileNumber = 1;
+		
+		queryFor:
+		for (int page = 0 ; page <= qtdPages; page++) {
+			
+			int size = (page+1)*pageSize;
+			System.out.println(" from: "+( (page*pageSize)+1 )+" to: "+((int) ( size < qtdresults ? size : qtdresults)));
+			try {
+			
+				logsOperacao.addAll(  
+						getLogOperacao(LogSystem.SIGEVENTOS.getId(), startDate.getTime(), endDate.getTime(), page == 0 ? 0 : (page*pageSize)+1, (int) ( size < qtdresults ? size : qtdresults) ) 
+						);	
+				
+			}catch(Exception ex) {
+				System.err.println("Error, next!");
+			}
+			
+			if(logsOperacao.size() > 50000) {
+				System.out.println("splitting..... ");
+				traningFileNumber = splittedByUser(traningFileNumber, logsOperacao);
+				logsOperacao  = new ArrayList<>();
+			}
+			
+			if(traningFileNumber > 1000) // we have our 1000 files, 1000 x 100 = 100.000 urls
+				break queryFor;
+			
+		}
+		
+		traningFileNumber = splittedByUser(traningFileNumber, logsOperacao);
+		logsOperacao  = new ArrayList<>();
+		System.out.println("final split ! ");
+		
+	}
+	
+	private static Integer splittedByUser(Integer traningFileNumber, List<LogOperacao> logsOperacao) {
+		
+		String PATH = "/home/jadson/Documentos/deeplog/csvs/final/";
+		
+		Map<String, List<LogOperacao>> splittedLogsOperacao = new HashMap<>();
+		
+		for (LogOperacao logOperacao : logsOperacao) {
+			if( splittedLogsOperacao.containsKey(logOperacao.id_registro_entrada)  ){
+				List<LogOperacao> logsOfUser = splittedLogsOperacao.get(logOperacao.id_registro_entrada);
+				logsOfUser.add(logOperacao);
+			}else {
+				List<LogOperacao> logsOfUser = new ArrayList<>();
+				logsOfUser.add(logOperacao);
+				splittedLogsOperacao.put(logOperacao.id_registro_entrada, logsOfUser);
+			}
+		}
+		
+		return generateTraningDataURLSplittedByUser(PATH, traningFileNumber, splittedLogsOperacao);
+	}
+	
+	
+	/**
+	 * Generate the traning data files splitted by user. with just the URL information and with a fixed 100 log size.
+	 * 
+	 * @param PATH
+	 * @param userMapLog
+	 */
+	private static Integer generateTraningDataURLSplittedByUser(String PATH, Integer traningFileNumber, Map<String, List<LogOperacao>> userMapLog) {
+		
+		List<String> userList = new ArrayList<>(userMapLog.keySet());
+		
+		for (int userNumber = 0 ; userNumber < userMapLog.keySet().size(); userNumber++) {
+			
+			String id_registro_entrada = userList.get(userNumber);
+			
+			List<LogOperacao> logs = userMapLog.get(id_registro_entrada);
+			
+			int stepSize = logs.size();
+			
+			
+			// 100 entry by log
+			List<LogOperacao> subLogs = new ArrayList<>(); 
+			
+			if(stepSize > 100) { // just generated if have at least 100 steps
+				subLogs = logs.subList(0, 100);
+				CSVUtil.generateURLTOCSVFile(subLogs, PATH+"training_"+traningFileNumber+".csv");
+				System.out.println("generating training log file: "+traningFileNumber);
+				traningFileNumber++;
+			}
+//			else {
+//				subLogs = logs;
+//				for(int j = logs.size(); j < 100; j++) {
+//					LogOperacao log = new LogOperacao();
+//					log.url = "";
+//					subLogs.add( log );  // generated the empty log to complete the size 100
+//			    }
+//			}
+				
+			
+		}
+		
+		return traningFileNumber;
+	}
+	
+	
+	
+	
+	
+	public static void getLogOperacaoFromAllUsers() throws IOException {
+
+		ZoneId defaultZoneId = ZoneId.systemDefault();
+		
+		LocalDateTime start = LocalDateTime.now();
+		start = start.minusMonths(1);
+		Date startDate = Date.from(start.atZone(defaultZoneId).toInstant());
+		
+		LocalDateTime end = LocalDateTime.now();
+		end = end.minusMonths(0);
+		Date endDate = Date.from(end.atZone(defaultZoneId).toInstant());
+		
+		long qtdresults = countLogOperacao(LogSystem.SIGEVENTOS.getId(), startDate.getTime(), endDate.getTime(), 0, 0); // 11 million
+		
+		System.out.println(">>>>>>>>>>>>>>>>>>>>>> "+qtdresults);
+		
 		int pageSize = 1000;
 		
 		int qtdPages = (int) (qtdresults/pageSize);
 		
-		List<LogOperacao> logsOperacao = new ArrayList<>();
+		String PATH = "/home/jadson/Documentos/temp_files/csvs/";
+		
+		String[] sets = new String[]{PATH+"test.csv", PATH+"validation.csv", PATH+"training.csv"};
+		
+		Random random = new Random(System.currentTimeMillis());
+		
 		
 		for (int page = 0 ; page <= qtdPages; page++) {
+			
 			int size = (page+1)*pageSize;
-			logsOperacao.addAll( getLogOperacao(LogSystem.SIGEVENTOS.getId(), startDate.getTime(), endDate.getTime(), page == 0 ? 0 : (page*pageSize)+1, (int) ( size < qtdresults ? size : qtdresults) ) );
+			List<LogOperacao> logsOperacao =  getLogOperacao(LogSystem.SIGEVENTOS.getId(), startDate.getTime(), endDate.getTime(), page == 0 ? 0 : (page*pageSize)+1, (int) ( size < qtdresults ? size : qtdresults) ) ;
+			
+			int shuffle = random.nextInt(3);
+			
+			CSVUtil.generateLogOperacaoCSVFile(logsOperacao, sets[shuffle]);
 		}
 		
-		System.out.println(" >>>>>>>>>>>>>>>>>>>>> QTD LOGS "+logsOperacao.size());
-		
+		//System.out.println(" >>>>>>>>>>>>>>>>>>>>> QTD LOGS "+logsOperacao.size());
 	}
+	
+	
+	
+	
+	
+	
 	
 	
 	/**
@@ -120,7 +279,7 @@ public class ElasticSearchLogOperacaoRestClient {
 		
 		String urlRequisitadaElasticsearch = String.format(TEMPLATE_URL_COUNT_ELASTICSEARCH	, ELASTIC_SEARCH_URL, "indice_log_operacao-*", "log_operacao");
 		
-		System.out.println("URL Query Elasticsearch: "+urlRequisitadaElasticsearch);
+		System.out.println("["+Instant.now()+"] URL Query Elasticsearch: "+urlRequisitadaElasticsearch);
 		
 		HttpPost httpPost = new HttpPost(urlRequisitadaElasticsearch);
 		
@@ -276,17 +435,22 @@ public class ElasticSearchLogOperacaoRestClient {
 				JsonNode _source = node.path("_source");
 				
 				LogOperacao log = new LogOperacao();
-				log.id_registro_entrada        = _source.get("data_hora_operacao").toString();
+				log.timestamp                  = _source.get("@timestamp").toString();
+				log.id_registro_entrada        = _source.get("id_registro_entrada") != null ? _source.get("id_registro_entrada").toString() : "";
 				log.url                        = _source.get("url").toString();
 				log.data_hora_operacao         = _source.get("data_hora_operacao").toString();
-				log.parametros                 = _source.get("parametros").toString();
+				log.parametros                 = _source.get("parametros").toString().replaceAll(";", " ");
 				log.tempo                      = _source.get("tempo").toString();
-				log.erro                       = _source.get("erro").toString();
-				log.nomeExcecao                = _source.get("data_hora_operacao").toString();
-				log.message                    = _source.get("message").toString();
+				log.erro                       = _source.get("erro").toString().replaceAll(";", " ");
+				log.nomeExcecao                = _source.get("nome_excecao") != null ? _source.get("nome_excecao").toString().replaceAll(";", " ") : "";
+				log.message                    = _source.get("message").toString().replaceAll(";", " ");
 				log.id_sistema                 = _source.get("id_sistema").toString();
 				
-				logsOperacao.add(log);
+				if( ! log.url.contains("/eventos/public/evento/") 
+						&& ! log.url.contains("/eventos/public/pagina_publica/") 
+						&& ! log.url.contains("/javax.faces.resource/")
+						)
+					logsOperacao.add(log);
 
 			}
 		}

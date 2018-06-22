@@ -39,4 +39,26 @@ public class CSVUtil {
 		
 	}
 	
+	
+	
+	public static void generateURLTOCSVFile(List<LogOperacao> logsOperacao, String csvFileName) {
+		
+		try{
+			FileWriter writer = new FileWriter(csvFileName, true);
+			
+			for (LogOperacao logOperacao : logsOperacao) {
+				writer.append(logOperacao.url);
+				writer.append("\n");
+			}
+			
+			writer.flush();
+			writer.close();
+			
+		}catch(IOException io) {
+			
+		}
+		
+	}
+	
+	
 }
